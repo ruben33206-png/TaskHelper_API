@@ -3,7 +3,6 @@ FROM python:3.11.14-alpine3.23
 WORKDIR /TaskHelper_API
 
 COPY requirements.txt .
-COPY init.sh .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
