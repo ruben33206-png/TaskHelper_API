@@ -1,11 +1,12 @@
 from fastapi import FastAPI, HTTPException 
 import uvicorn
 from database import engine, SessionLocal 
-from models import Base, User 
+from models import Base, User, Game 
 from schemas import UserCreate, UserOut,UserLogin
 from sqlalchemy.orm import Session 
 from fastapi import Depends
 import uuid
+import json
 
 app = FastAPI()
 
@@ -48,19 +49,17 @@ def listar_users(db: Session = Depends(get_db)):
     users = db.query(User).all()
     return users
 
-from schemas import UserLogin
-
 @app.post("/login")
 def login(user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user.email).first()
 
     if not db_user:
-        raise HTTPException(status_code=400, detail="Email não encontrado")
+        raise HTTPException(status_code=400, detail="Email/Password Incorretos")
 
     if db_user.passencrypt != user.password:
-        raise HTTPException(status_code=400, detail="Password incorreta")
+        raise HTTPException(status_code=400, detail="Email/Password Incorretos")
 
-    return {
+    return jsoninify{
         "message": "Login efetuado com sucesso",
         "userid": db_user.userid,
         "username": db_user.username,
@@ -68,6 +67,7 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         "currentxp": db_user.currentxp,
         "currentlvl": db_user.currentlvl
     }
+
 
 
 if __name__ == "__main__":

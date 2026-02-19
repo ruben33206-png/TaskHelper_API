@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
-from sqlalchemy.orm import relationship
-from database import Base
+from sqlalchemy.orm import relationship, Session
+from database import Base, SessionLocal
+from fastapi import Depends
 import json
 
 class User(Base):
@@ -63,3 +64,6 @@ class UserQuest(Base):
     user = relationship("User", back_populates="quests")
     quest = relationship("Quest", back_populates="users")
     game = relationship("Game", back_populates="quests")
+
+
+
