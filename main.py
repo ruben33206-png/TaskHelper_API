@@ -58,8 +58,8 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
 
     if db_user.passencrypt != user.password:
         raise HTTPException(status_code=400, detail="Email/Password Incorretos")
-
-    return jsoninify{
+    
+    return {
         "message": "Login efetuado com sucesso",
         "userid": db_user.userid,
         "username": db_user.username,
