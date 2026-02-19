@@ -8,7 +8,7 @@ class User(Base):
     __tablename__ = "user"
 
     id = Column(Integer, primary_key=True)
-    userid = Column(String, unique=True, nullable=False)
+    userid = Column(String(36), unique=True, nullable=False)
     username = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
     passencrypt = Column(String, nullable=False)
@@ -45,7 +45,7 @@ class UserQuest(Base):
     __tablename__ = "user_quests"
 
     userid = Column(
-        String,
+        String(36),
         ForeignKey("user.userid"),
         primary_key=True
     )

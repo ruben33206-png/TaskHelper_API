@@ -1,12 +1,11 @@
-from fastapi import FastAPI, HTTPException 
+from fastapi import FastAPI, HTTPException, Depends 
 import uvicorn
 from database import engine, SessionLocal 
-from models import Base, User, Game 
-from schemas import UserCreate, UserOut,UserLogin
+from models import Base, User, Game, Quest, UserQuest 
+from schemas import UserCreate, UserOut,UserLogin, QuestOut
 from sqlalchemy.orm import Session 
-from fastapi import Depends
 import uuid
-import json
+from utils import add_xp_and_update_level
 
 app = FastAPI()
 
@@ -68,6 +67,21 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         "currentlvl": db_user.currentlvl
     }
 
+@app.get("/quests/disponiveis/{userid}", response_model=list[QuestOut])
+def quests_disponiveis(userid: str, db: Session = Depends(get_db)):
+    # Verificar se user existe
+    user = db.query(User).filter(User.userid == userid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User não encontrado")
+
+    # Quests já completadas pelo user
+    completed_ids = db.query(UserQuest.questid).filter(UserQuest.userid == userid).all()
+    completed_ids = [q[0] for q in completed_ids]
+
+    # Quests disponíveis = todas menos as completadas
+    quests = db.query(Quest).filter(Quest.questid.not_in(completed_ids)).all()
+
+    return quests
 
 
 if __name__ == "__main__":
