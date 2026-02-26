@@ -19,6 +19,14 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class GameOut(BaseModel):
+    gameid: int
+    gamename: str
+    isdaily: bool
+
+    class Config:
+        from_attributes = True
+
 class QuestOut(BaseModel):
     questid: int
     questname: str
@@ -39,19 +47,10 @@ class CompletedQuest(BaseModel):
     questdescription: str
     rewards: str
 
-    class Config:
-        from_attributes = True
-
-
-class CompletedGameGroup(BaseModel):
+class CompletedGame(BaseModel):
     gameid: int
     gamename: str
     quests: list[CompletedQuest]
-
-
-class CompletedQuestsResponse(BaseModel):
-    userid: str
-    games: list[CompletedGameGroup]
 
 class ChangeUsername(BaseModel):
     new_username: str

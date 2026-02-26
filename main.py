@@ -7,9 +7,9 @@ from schemas import (
     UserOut,
     UserLogin,
     QuestOut,
+    GameOut,
     CompletedQuest,
-    CompletedGameGroup,
-    CompletedQuestsResponse,
+    CompletedGame,
     ChangeUsername, 
     ChangeEmail, 
     ChangePassword,
@@ -17,15 +17,26 @@ from schemas import (
 )
 from sqlalchemy.orm import Session
 import uuid
-from utils import add_xp_and_update_level
+from utils import add_xp_and_update_level, remove_xp_and_update_level
 from datetime import datetime
+from passlib.context import CryptContext
+from auth import create_access_token, get_current_user
+
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
 
 app = FastAPI()
 Base.metadata.create_all(bind=engine)
 
 @app.get("/")
 def read_root():
-    return {"message": "API funcionando"}
+    return {"message": "API Working"}
 
 def get_db():
     db = SessionLocal()
@@ -44,7 +55,7 @@ def registrar_usuario(user: UserCreate, db: Session = Depends(get_db)):
         userid=str(uuid.uuid4()), 
         username=user.username,
         email=user.email,
-        passencrypt=user.password, 
+        passencrypt=hash_password(user.password),
         currentxp=0,
         currentlvl=0
     )
@@ -54,6 +65,7 @@ def registrar_usuario(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(novo_user)
 
     return {"message": "Usuário registrado com sucesso", "userid": novo_user.userid}
+
 
 @app.get("/users", response_model=list[UserOut])
 def listar_users(db: Session = Depends(get_db)):
@@ -67,11 +79,17 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     if not db_user:
         raise HTTPException(status_code=400, detail="Email/Password Incorretos")
 
-    if db_user.passencrypt != user.password:
+    if not verify_password(user.password, db_user.passencrypt):
         raise HTTPException(status_code=400, detail="Email/Password Incorretos")
-    
+
+    access_token = create_access_token(
+        data={"sub": db_user.userid}
+    )
+
     return {
         "message": "Login efetuado com sucesso",
+        "access_token": access_token,
+        "token_type": "bearer",
         "userid": db_user.userid,
         "username": db_user.username,
         "email": db_user.email,
@@ -79,25 +97,47 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         "currentlvl": db_user.currentlvl
     }
 
-@app.get("/games")
+
+@app.get("/games", response_model=list[GameOut])
 def listar_games(db: Session = Depends(get_db)):
     games = db.query(Game).all()
-    return [
-        {
-            "gameid": g.gameid,
-            "gamename": g.gamename
-        }
-        for g in games
-    ]
+    return games
 
 @app.get("/quests/disponiveis/{userid}", response_model=list[QuestOut])
-def quests_disponiveis(userid: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.userid == userid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User não encontrado")
+def quests_disponiveis(userid: str, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
     completed_ids = db.query(UserQuest.questid).filter(UserQuest.userid == userid).all()
     completed_ids = [q[0] for q in completed_ids]
-    quests = db.query(Quest).filter(Quest.questid.not_in(completed_ids)).all()
+    quests = db.query(Quest).filter(
+        Quest.questid.not_in(completed_ids),
+        Quest.isdaily == False
+    ).all()
+
+    result = []
+    for q in quests:
+        result.append({
+            "questid": q.questid,
+            "questname": q.questname,
+            "questdescription": q.questdescription,
+            "requirements": q.requirements,
+            "howtodoit": q.howtodoit,
+            "rewards": q.rewards,
+            "isdaily": q.isdaily,
+            "gameid": q.gameid,
+            "gamename": q.game.gamename
+        })
+    return result
+
+@app.get("/quests/daily/{userid}", response_model=list[QuestOut])
+def quests_daily(userid: str, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
+
+    quests = db.query(Quest).filter(
+        Quest.isdaily == True
+    ).all()
+
     result = []
     for q in quests:
         result.append({
@@ -114,17 +154,14 @@ def quests_disponiveis(userid: str, db: Session = Depends(get_db)):
 
     return result
 
-
-
-
-
 XP_REWARD = 10
 
-@app.post("/quests/check/{userid}/{questid}")
-def check_quest(userid: str, questid: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.userid == userid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User não encontrado")
+@app.patch("/quests/check/{userid}/{questid}")
+def check_quest(userid: str, questid: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
+
+    user = db.query(User).filter(User.userid == userid).first()  # ← FALTAVA ISTO
 
     quest = db.query(Quest).filter(Quest.questid == questid).first()
     if not quest:
@@ -146,7 +183,6 @@ def check_quest(userid: str, questid: int, db: Session = Depends(get_db)):
     )
 
     db.add(user_quest)
-
     add_xp_and_update_level(user, XP_REWARD)
 
     db.commit()
@@ -159,19 +195,50 @@ def check_quest(userid: str, questid: int, db: Session = Depends(get_db)):
         "currentlvl": user.currentlvl
     }
 
-@app.get("/quests/completas/{userid}", response_model=CompletedQuestsResponse)
-def quests_completas(userid: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.userid == userid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User não encontrado")
+@app.delete("/quests/unmark/{userid}/{questid}")
+def unmark_quest(userid: str, questid: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
+
+    user = db.query(User).filter(User.userid == userid).first()  # ← FALTAVA ISTO
+
+    completed_quest = db.query(UserQuest).filter(
+        UserQuest.userid == userid,
+        UserQuest.questid == questid
+    ).first()
+
+    if not completed_quest:
+        raise HTTPException(status_code=400, detail="Esta quest ainda não foi marcada como concluída")
+
+    db.delete(completed_quest)
+    remove_xp_and_update_level(user, XP_REWARD)
+
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "Quest desmarcada com sucesso",
+        "xp_removido": XP_REWARD,
+        "currentxp": user.currentxp,
+        "currentlvl": user.currentlvl
+    }
+
+@app.get("/quests/completas/{userid}", response_model=list[CompletedGame])
+def quests_completas(userid: str, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
 
     completed = db.query(UserQuest).filter(UserQuest.userid == userid).all()
 
     games_dict = {}
 
     for uq in completed:
-        game = uq.game
         quest = uq.quest
+        
+        if quest.isdaily:
+            continue
+
+        game = quest.game
 
         if game.gameid not in games_dict:
             games_dict[game.gameid] = {
@@ -187,18 +254,15 @@ def quests_completas(userid: str, db: Session = Depends(get_db)):
             "rewards": quest.rewards
         })
 
-    games_list = list(games_dict.values())
+    return list(games_dict.values())
 
-    return {
-        "userid": userid,
-        "games": games_list
-    }
 
 @app.put("/changeuser/{userid}")
-def change_username(userid: str, data: ChangeUsername, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.userid == userid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User não encontrado")
+def change_username(userid: str, data: ChangeUsername, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
+
+    user = db.query(User).filter(User.userid == userid).first()  # ← FALTAVA ISTO
 
     user.username = data.new_username
     db.commit()
@@ -207,10 +271,11 @@ def change_username(userid: str, data: ChangeUsername, db: Session = Depends(get
     return {"message": "Username atualizado com sucesso", "new_username": user.username}
 
 @app.put("/changemail/{userid}")
-def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.userid == userid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User não encontrado")
+def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
+
+    user = db.query(User).filter(User.userid == userid).first()  # ← FALTAVA ISTO
 
     email_exists = db.query(User).filter(User.email == data.new_email).first()
     if email_exists:
@@ -223,31 +288,34 @@ def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db)):
     return {"message": "Email atualizado com sucesso", "new_email": user.email}
 
 @app.put("/changepass/{userid}")
-def change_password(userid: str, data: ChangePassword, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.userid == userid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User não encontrado")
+def change_password(userid: str, data: ChangePassword, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
 
-    user.passencrypt = data.new_password
+    user = db.query(User).filter(User.userid == userid).first()  # ← FALTAVA ISTO
+
+    user.passencrypt = hash_password(data.new_password)
+
     db.commit()
     db.refresh(user)
 
     return {"message": "Password atualizada com sucesso"}
 
 @app.delete("/deleteuser/{userid}")
-def delete_user(userid: str, data: DeleteUserRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.userid == userid).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User não encontrado")
+def delete_user(userid: str, data: DeleteUserRequest, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
 
-    if user.passencrypt != data.password:
+    user = db.query(User).filter(User.userid == userid).first()  # ← FALTAVA ISTO
+
+    if not verify_password(data.password, user.passencrypt):
         raise HTTPException(status_code=401, detail="Password incorreta")
 
     db.query(UserQuest).filter(UserQuest.userid == userid).delete()
-
     db.delete(user)
     db.commit()
 
     return {"message": "Utilizador eliminado com sucesso"}
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

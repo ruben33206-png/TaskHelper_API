@@ -37,8 +37,9 @@ class Quest(Base):
 class Game(Base):
     __tablename__ = "game"
 
-    gameid = Column(Integer, primary_key=True)
+    gameid = Column(Integer, primary_key=True, autoincrement=False)
     gamename = Column(String, nullable=False)
+    isdaily = Column(Boolean, nullable=False, default=False)
 
     quests = relationship("Quest", back_populates="game")
 
