@@ -64,15 +64,16 @@ class CompletedGame(BaseModel):
     quests: list[CompletedQuest]
 
 class ChangeUsername(BaseModel):
+    currentPass: str
     new_username: str
 
-
 class ChangeEmail(BaseModel):
-    new_email: EmailStr
-
+    currentPass: str
+    new_email: str
 
 class ChangePassword(BaseModel):
+    currentPass: str
     new_password: str
 
 class DeleteUserRequest(BaseModel):
-    password: str
+    currentPass: str

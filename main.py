@@ -97,10 +97,21 @@ def registrar_usuario(user: UserCreate, db: Session = Depends(get_db)):
 
 
 
-@app.get("/users", response_model=list[UserOut])
-def listar_users(db: Session = Depends(get_db)):
-    users = db.query(User).filter(User.userid != "main").all()
-    return users
+@app.get("/users/{userid}")
+def get_user_by_id(userid: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.userid == userid).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    return {
+        "userid": user.userid,
+        "username": user.username,
+        "email": user.email,
+        "currentxp": user.currentxp,
+        "currentlvl": user.currentlvl
+    }
+
 
 @app.post("/login")
 def login(user: UserLogin, db: Session = Depends(get_db)):
@@ -222,10 +233,8 @@ def check_quest(
             today = datetime.now().date()
 
             if last_date == today:
-                # já fez hoje
                 raise HTTPException(status_code=400, detail="Daily quest já foi completada hoje")
             else:
-                # fez noutro dia → apagamos para poder registar de novo
                 db.delete(completed)
                 db.commit()
 
@@ -317,6 +326,8 @@ def change_username(userid: str, data: ChangeUsername, db: Session = Depends(get
         raise HTTPException(status_code=403, detail="Não autorizado")
 
     user = db.query(User).filter(User.userid == userid).first()
+    if not verify_password(data.currentPass, user.passencrypt):
+        raise HTTPException(status_code=400, detail="Password atual incorreta")
 
     user.username = data.new_username
     db.commit()
@@ -324,12 +335,16 @@ def change_username(userid: str, data: ChangeUsername, db: Session = Depends(get
 
     return {"message": "Username atualizado com sucesso", "new_username": user.username}
 
+
 @app.put("/changemail/{userid}")
 def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     if userid != current_user:
         raise HTTPException(status_code=403, detail="Não autorizado")
 
-    user = db.query(User).filter(User.userid == userid).first()  
+    user = db.query(User).filter(User.userid == userid).first()
+
+    if not verify_password(data.currentPass, user.passencrypt):
+        raise HTTPException(status_code=400, detail="Password atual incorreta")
 
     email_exists = db.query(User).filter(User.email == data.new_email).first()
     if email_exists:
@@ -341,19 +356,23 @@ def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db), 
 
     return {"message": "Email atualizado com sucesso", "new_email": user.email}
 
+
 @app.put("/changepass/{userid}")
 def change_password(userid: str, data: ChangePassword, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     if userid != current_user:
         raise HTTPException(status_code=403, detail="Não autorizado")
 
-    user = db.query(User).filter(User.userid == userid).first() 
+    user = db.query(User).filter(User.userid == userid).first()
+
+    if not verify_password(data.currentPass, user.passencrypt):
+        raise HTTPException(status_code=400, detail="Password atual incorreta")
 
     user.passencrypt = hash_password(data.new_password)
-
     db.commit()
     db.refresh(user)
 
     return {"message": "Password atualizada com sucesso"}
+
 
 @app.delete("/deleteuser/{userid}")
 def delete_user(userid: str, data: DeleteUserRequest, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
@@ -362,7 +381,7 @@ def delete_user(userid: str, data: DeleteUserRequest, db: Session = Depends(get_
 
     user = db.query(User).filter(User.userid == userid).first() 
 
-    if not verify_password(data.password, user.passencrypt):
+    if not verify_password(data.currentPass, user.passencrypt):
         raise HTTPException(status_code=401, detail="Password incorreta")
 
     db.query(UserQuest).filter(UserQuest.userid == userid).delete()
