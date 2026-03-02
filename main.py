@@ -26,7 +26,7 @@ from auth import create_access_token, get_current_user
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 from fastapi.middleware.cors import CORSMiddleware
-
+import re
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 def hash_password(password: str) -> str:
@@ -46,6 +46,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+XP_REWARD = 10
 
 @app.get("/")
 def read_root():
@@ -215,8 +216,6 @@ def quests_daily(userid: str, db: Session = Depends(get_db), current_user: str =
 
     return result
 
-XP_REWARD = 10
-
 @app.patch("/quests/check/{userid}/{questid}")
 def check_quest(
     userid: str,
@@ -280,30 +279,42 @@ def check_quest(
         "currentlvl": user.currentlvl
     }
 
-@app.patch("/quests/uncheck/{userid}/{questid}")
-def unmark_quest(userid: str, questid: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+@app.put("/quests/uncheck/{userid}/{questid}")
+def uncheck_quest(userid: str, questid: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     if userid != current_user:
         raise HTTPException(status_code=403, detail="Não autorizado")
 
-    user = db.query(User).filter(User.userid == userid).first()  
+    user = db.query(User).filter(User.userid == userid).first()
+    quest = db.query(Quest).filter(Quest.questid == questid).first()
 
-    completed_quest = db.query(UserQuest).filter(
+    if not quest:
+        raise HTTPException(status_code=404, detail="Quest não encontrada")
+
+    completed = db.query(UserQuest).filter(
         UserQuest.userid == userid,
         UserQuest.questid == questid
     ).first()
 
-    if not completed_quest:
-        raise HTTPException(status_code=400, detail="Esta quest ainda não foi marcada como concluída")
+    if not completed:
+        raise HTTPException(status_code=400, detail="A quest não está marcada")
 
-    db.delete(completed_quest)
-    remove_xp_and_update_level(user, XP_REWARD)
+    db.delete(completed)
+
+    user.currentxp -= XP_REWARD
+
+    if user.currentxp < 0:
+        user.currentlvl -= 1
+
+        if user.currentlvl < 0:
+            user.currentlvl = 0
+
+        user.currentxp = 90
 
     db.commit()
     db.refresh(user)
 
     return {
         "message": "Quest desmarcada com sucesso",
-        "xp_removido": XP_REWARD,
         "currentxp": user.currentxp,
         "currentlvl": user.currentlvl
     }
@@ -378,6 +389,9 @@ def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db), 
     if not verify_password(data.currentPass, user.passencrypt):
         raise HTTPException(status_code=400, detail="Password atual incorreta")
 
+    if data.new_email == user.email:
+        raise HTTPException(status_code=400, detail="O novo email não pode ser igual ao atual")
+
     email_exists = db.query(User).filter(User.email == data.new_email).first()
     if email_exists:
         raise HTTPException(status_code=400, detail="Email já está em uso")
@@ -388,7 +402,6 @@ def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db), 
 
     return {"message": "Email atualizado com sucesso", "new_email": user.email}
 
-
 @app.put("/changepass/{userid}")
 def change_password(userid: str, data: ChangePassword, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     if userid != current_user:
@@ -396,15 +409,24 @@ def change_password(userid: str, data: ChangePassword, db: Session = Depends(get
 
     user = db.query(User).filter(User.userid == userid).first()
 
-    if not verify_password(data.currentPass, user.passencrypt):
+    if not verify_password(data.current_password, user.passencrypt):
         raise HTTPException(status_code=400, detail="Password atual incorreta")
+
+    if verify_password(data.new_password, user.passencrypt):
+        raise HTTPException(status_code=400, detail="A nova password não pode ser igual à atual")
+
+    password_regex = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{12,}$"
+    if not re.match(password_regex, data.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="A nova password deve ter pelo menos 12 caracteres, incluir maiúsculas, minúsculas e números"
+        )
 
     user.passencrypt = hash_password(data.new_password)
     db.commit()
     db.refresh(user)
 
     return {"message": "Password atualizada com sucesso"}
-
 
 @app.delete("/deleteuser/{userid}")
 def delete_user(userid: str, data: DeleteUserRequest, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
