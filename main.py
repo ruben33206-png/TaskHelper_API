@@ -10,6 +10,7 @@ from schemas import (
     QuestOutDaily,
     GameOut,
     CompletedQuest,
+    ChangeGame,
     CompletedGame,
     ChangeUsername, 
     ChangeEmail, 
@@ -59,6 +60,9 @@ def get_db():
 
 @app.post("/registro")
 def registrar_usuario(user: UserCreate, db: Session = Depends(get_db)):
+    if len(user.username) > 15:
+        raise HTTPException(status_code=400, detail="O username deve ter no máximo 15 caracteres")
+
     user_exist = db.query(User).filter(User.email == user.email).first()
     if user_exist:
         raise HTTPException(status_code=400, detail="Email já está registado")
@@ -73,16 +77,15 @@ def registrar_usuario(user: UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         passencrypt=hash_password(user.password),
         currentxp=0,
-        currentlvl=0
+        currentlvl=0,
+        defaultGame=5
     )
 
     db.add(novo_user)
     db.commit()
     db.refresh(novo_user)
 
-    token = create_access_token(
-        data={"sub": novo_user.userid}
-    )
+    token = create_access_token(data={"sub": novo_user.userid})
 
     return {
         "message": "Usuário registado com sucesso",
@@ -92,10 +95,9 @@ def registrar_usuario(user: UserCreate, db: Session = Depends(get_db)):
         "username": novo_user.username,
         "email": novo_user.email,
         "currentxp": novo_user.currentxp,
-        "currentlvl": novo_user.currentlvl
+        "currentlvl": novo_user.currentlvl,
+        "defaultGame": novo_user.defaultGame
     }
-
-
 
 @app.get("/users/{userid}")
 def get_user_by_id(userid: str, db: Session = Depends(get_db)):
@@ -112,6 +114,25 @@ def get_user_by_id(userid: str, db: Session = Depends(get_db)):
         "currentlvl": user.currentlvl
     }
 
+@app.put("/changegame/{userid}")
+def change_game(userid: str, data: ChangeGame, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if userid != current_user:
+        raise HTTPException(status_code=403, detail="Não autorizado")
+
+    user = db.query(User).filter(User.userid == userid).first()
+
+    selected_game = db.query(Game).filter(Game.gameid == data.gameid).first()
+    if not selected_game:
+        raise HTTPException(status_code=400, detail="Jogo inválido")
+
+    user.defaultGame = selected_game.gameid
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "Jogo alterado com sucesso",
+        "defaultGame": user.defaultGame
+    }
 
 @app.post("/login")
 def login(user: UserLogin, db: Session = Depends(get_db)):
@@ -135,7 +156,8 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         "username": db_user.username,
         "email": db_user.email,
         "currentxp": db_user.currentxp,
-        "currentlvl": db_user.currentlvl
+        "currentlvl": db_user.currentlvl,
+        "defaultGame": db_user.defaultGame
     }
 
 
@@ -326,6 +348,17 @@ def change_username(userid: str, data: ChangeUsername, db: Session = Depends(get
         raise HTTPException(status_code=403, detail="Não autorizado")
 
     user = db.query(User).filter(User.userid == userid).first()
+
+    if len(data.new_username) > 15:
+        raise HTTPException(status_code=400, detail="O username deve ter no máximo 15 caracteres")
+
+    if data.new_username == user.username:
+        raise HTTPException(status_code=400, detail="O novo username não pode ser igual ao atual")
+
+    username_exists = db.query(User).filter(User.username == data.new_username).first()
+    if username_exists:
+        raise HTTPException(status_code=400, detail="Este username já está em uso")
+
     if not verify_password(data.currentPass, user.passencrypt):
         raise HTTPException(status_code=400, detail="Password atual incorreta")
 
@@ -334,7 +367,6 @@ def change_username(userid: str, data: ChangeUsername, db: Session = Depends(get
     db.refresh(user)
 
     return {"message": "Username atualizado com sucesso", "new_username": user.username}
-
 
 @app.put("/changemail/{userid}")
 def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):

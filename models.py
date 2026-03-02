@@ -14,6 +14,7 @@ class User(Base):
     passencrypt = Column(String, nullable=False)
     currentxp = Column(Integer, nullable=False)
     currentlvl = Column(Integer, nullable=False)
+    defaultGame = Column(Integer, nullable=False)
 
     quests = relationship("UserQuest", back_populates="user")
 

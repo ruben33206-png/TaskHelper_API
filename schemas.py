@@ -63,6 +63,9 @@ class CompletedGame(BaseModel):
     gamename: str
     quests: list[CompletedQuest]
 
+class ChangeGame(BaseModel):
+    gameid: int
+
 class ChangeUsername(BaseModel):
     currentPass: str
     new_username: str
