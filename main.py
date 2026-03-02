@@ -380,6 +380,8 @@ def change_username(userid: str, data: ChangeUsername, db: Session = Depends(get
 
     return {"message": "Username atualizado com sucesso", "new_username": user.username}
 
+import re
+
 @app.put("/changemail/{userid}")
 def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     if userid != current_user:
@@ -389,6 +391,10 @@ def change_email(userid: str, data: ChangeEmail, db: Session = Depends(get_db), 
 
     if not verify_password(data.currentPass, user.passencrypt):
         raise HTTPException(status_code=400, detail="Password atual incorreta")
+
+    email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+    if not re.match(email_regex, data.new_email):
+        raise HTTPException(status_code=400, detail="Formato de email inválido")
 
     if data.new_email == user.email:
         raise HTTPException(status_code=400, detail="O novo email não pode ser igual ao atual")
@@ -410,7 +416,7 @@ def change_password(userid: str, data: ChangePassword, db: Session = Depends(get
 
     user = db.query(User).filter(User.userid == userid).first()
 
-    if not verify_password(data.current_password, user.passencrypt):
+    if not verify_password(data.currentPass, user.passencrypt):
         raise HTTPException(status_code=400, detail="Password atual incorreta")
 
     if verify_password(data.new_password, user.passencrypt):
