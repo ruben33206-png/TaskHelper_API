@@ -280,7 +280,7 @@ def check_quest(
         "currentlvl": user.currentlvl
     }
 
-@app.put("/quests/uncheck/{userid}/{questid}")
+@app.patch("/quests/uncheck/{userid}/{questid}")
 def uncheck_quest(userid: str, questid: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     if userid != current_user:
         raise HTTPException(status_code=403, detail="Não autorizado")
